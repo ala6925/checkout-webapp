@@ -1,28 +1,76 @@
 # Generate-QRs.ps1
 param(
     [string]$OutDir = "$PWD\PathologistQRCodes",
-    [string[]]$Doctors = @(
-        'Masoud Asgari (MXA)','Alfredo Asuncion (AXA)','Nasim Babaidorabad (NXB)','Sepideh Banankah (SMB)','Ricardo Bardales (RHB)','Preeti Behl (PXB)','Takinder Bisla (TSB)','Olga Bohn (OLB)','Harvey Chang (HCC)','Prakash Chaudhari (PJC)','Michael Costa (MJC)', 'Shawn Emery (SCE)','Steven Fogel (SPF)','Donovan Hare (DRH)','Nazila Hejazi (NXH)','Seyed Amin Hojat (SXH)','Yingchuan Hu (YXH)','Emad Kaabipour (EXK)','Sara Kwong (SJK)','Teresa Limjoco (TIL)','Martin Luu (LUU)','Gopal Patel (GXP)','Christy Perez-Valles (CPV)','Melissa Rodgers (MMR)','Diane Sanders (DLS)','Roya Setarehshenas (RXS)','Scott Silveira (SGS)','Phillip Starshak (PSE),'Curtis Strong (CRS)','Rana Tawil (RNT)','Miao Tan (MXT)','Linda Veneman (LXV)','Anthony Victorio (ARV)','Anthony Wheeler (AMW)')
+
+    # Use a hashtable: Key = file-safe short code, Value = display name
+    [hashtable]$Doctors = @{
+        MXA = 'Masoud Asgari'
+        AXA = 'Alfredo Asuncion'
+        NXB = 'Nasim Babaidorabad'
+        SMB = 'Sepideh Banankah'
+        RHB = 'Ricardo Bardales'
+        PXB = 'Preeti Behl'
+        TSB = 'Takinder Bisla'
+        OLB = 'Olga Bohn'
+        HCC = 'Harvey Chang'
+        PJC = 'Prakash Chaudhari'
+        MJC = 'Michael Costa'
+        SCE = 'Shawn Emery'
+        SPF = 'Steven Fogel'
+        DRH = 'Donovan Hare'
+        NXH = 'Nazila Hejazi'
+        SXH = 'Seyed Amin Hojat'
+        YXH = 'Yingchuan Hu'
+        EXK = 'Emad Kaabipour'
+        SJK = 'Sara Kwong'
+        TIL = 'Teresa Limjoco'
+        LUU = 'Martin Luu'
+        GXP = 'Gopal Patel'
+        CPV = 'Christy Perez-Valles'
+        MMR = 'Melissa Rodgers'
+        DLS = 'Diane Sanders'
+        RXS = 'Roya Setarehshenas'
+        SGS = 'Scott Silveira'
+        PSE = 'Phillip Starshak'
+        CRS = 'Curtis Strong'
+        RNT = 'Rana Tawil'
+        MXT = 'Miao Tan'
+        LXV = 'Linda Veneman'
+        ARV = 'Anthony Victorio'
+        AMW = 'Anthony Wheeler'
+    }
 )
 
-# Pull QRCoder DLL
-if (-not (Test-Path ".\QRCoder.dll")) {
-    Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/QRCoder/1.6.0" -OutFile q.tzip
-    Expand-Archive q.tzip -DestinationPath .\qtmp -Force
-    Copy-Item .\qtmp\**\QRCoder.dll -Destination .\QRCoder.dll
-    Remove-Item q.tzip, qtmp -Recurse
+# ---------- fetch QRCoder once ----------
+$lib = "$PSScriptRoot\QRCoder.dll"
+if (-not (Test-Path $lib)) {
+    $tmp = "$env:TEMP\qrcoder_$([guid]::NewGuid())"
+    Invoke-WebRequest "https://www.nuget.org/api/v2/package/QRCoder/1.6.0" -OutFile "$tmp.zip"
+    Expand-Archive "$tmp.zip" -DestinationPath $tmp -Force
+    $dll = Get-ChildItem $tmp -Recurse -Filter QRCoder.dll | Select-Object -First 1
+    Copy-Item $dll.FullName $lib
+    Remove-Item $tmp, "$tmp.zip" -Recurse -Force
 }
+Add-Type -Path $lib
 
-Add-Type -Path ".\QRCoder.dll"
+# ---------- output dir ----------
+New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 
-[System.IO.Directory]::CreateDirectory($OutDir) | Out-Null
-$gen  = [QRCoder.QRCodeGenerator]::new()
-foreach ($d in $Doctors) {
-    $payload = "PA:$d"
+$gen = [QRCoder.QRCodeGenerator]::new()
+foreach ($code in $Doctors.Keys) {
+
+    # 1. payload string that matches verifier regex
+    $payload = "PA:$code"
+
+    # 2. QR bitmap
     $data = $gen.CreateQrCode($payload, [QRCoder.QRCodeGenerator+ECCLevel]::Q)
-    $qr = [QRCoder.QRCode]::new($data)
-    $bmp = $qr.GetGraphic(20)  # 20 = pixels per module
-    $file = Join-Path $OutDir "$d.png"
+    $qr   = [QRCoder.QRCode]::new($data)
+    $bmp  = $qr.GetGraphic(20)
+
+    # 3. file name uses short code only – safe
+    $file = Join-Path $OutDir "$code.png"
     $bmp.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
-    Write-Host "Wrote $file"
+
+    # 4. console output with full name for sanity
+    Write-Host ("Wrote {0}  ->  {1}" -f $code, $Doctors[$code])
 }
