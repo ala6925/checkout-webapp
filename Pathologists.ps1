@@ -38,6 +38,9 @@ param(
         LXV = 'Linda Veneman'
         ARV = 'Anthony Victorio'
         AMW = 'Anthony Wheeler'
+        TLY = 'Tony Yang'
+        KXZ = 'Kuixing Zhang'
+        YXZ = 'Yi Zhuang'
     }
 )
 
