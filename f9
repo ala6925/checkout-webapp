@@ -1,0 +1,116 @@
+# C:\Cerebro\Assign-ByQR.ps1
+# QR-driven assignment without HMAC (no secret key).
+
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName PresentationFramework
+Add-Type -AssemblyName UIAutomationTypes
+Add-Type -AssemblyName UIAutomationClient
+
+# ---------- Config ----------
+$LogDir          = 'C:\Cerebro\Logs'
+$ProcessName     = 'Cerebro'
+$AssignComboName = 'Assigned Pathologist'
+$SaveButtonName  = 'Save'
+$HomeButtonName  = 'Home'
+$DedupeWindowMs  = 1500
+
+[IO.Directory]::CreateDirectory($LogDir) | Out-Null
+$global:ScanCache = @{}
+
+# ---------- UI prompt ----------
+function Show-ScanPrompt {
+    param([string]$Prompt = 'Scan QR (PA:<CODE>)', [int]$TimeoutMs = 10000)
+    $xaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        WindowStyle="None" ResizeMode="NoResize" Width="420" Height="120"
+        Topmost="True" ShowInTaskbar="False" Background="#111" Opacity="0.96">
+  <Border CornerRadius="12" Background="#202020" Padding="14">
+    <StackPanel>
+      <TextBlock Text="$Prompt" Foreground="#f2f2f2" FontSize="16" Margin="0,0,0,6"/>
+      <TextBox Name="InputBox" FontSize="18" Background="#111" Foreground="#e6e6e6" BorderBrush="#444" Padding="6"/>
+    </StackPanel>
+  </Border>
+</Window>
+"@
+    $w  = [Windows.Markup.XamlReader]::Load([xml]$xaml.CreateReader())
+    $tb = $w.FindName('InputBox')
+    $res = $null
+    $tb.Add_KeyDown({ if ($_.Key -eq 'Return') { $script:res=$tb.Text.Trim(); $w.Close() } })
+    $w.SourceInitialized += { $tb.Focus() }
+    $t = New-Object Windows.Threading.DispatcherTimer
+    $t.Interval=[TimeSpan]::FromMilliseconds($TimeoutMs)
+    $t.Add_Tick({ $w.Close() }); $t.Start()
+    $w.ShowDialog() | Out-Null
+    return $res
+}
+
+function Send-Keys([string]$Keys){ [System.Windows.Forms.SendKeys]::SendWait($Keys); Start-Sleep -Milliseconds 80 }
+
+function Get-AppWindow {
+    $p = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+    if(!$p){return $null}; [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+}
+
+function Find-Child($Root,[string]$Name,[string]$Type){
+    $ct=[System.Windows.Automation.ControlType]::$Type
+    $cond=New-Object System.Windows.Automation.AndCondition(
+        (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,$ct)),
+        (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,$Name)))
+    $Root.FindFirst([System.Windows.Automation.TreeScope]::Subtree,$cond)
+}
+
+function Assign-Pathologist([string]$Key){
+    $win=Get-AppWindow; if(!$win){throw 'Cerebro window not found'}
+    $win.SetFocus()
+
+    $combo=Find-Child $win $AssignComboName 'ComboBox'
+    if($combo){ $combo.SetFocus(); Send-Keys('%{DOWN}'); Send-Keys($Key); Send-Keys('{ENTER}') }
+    else{ Send-Keys('+{TAB}+{TAB}+{TAB}{TAB}{TAB}'); Send-Keys($Key); Send-Keys('{DOWN}{ENTER}') }
+
+    ($b=Find-Child $win $SaveButtonName 'Button') ? $b.Invoke() : Send-Keys('%s')
+    Start-Sleep -Milliseconds 120
+    ($h=Find-Child $win $HomeButtonName 'Button') ? $h.Invoke() : Send-Keys('%h')
+}
+
+function Log-Scan($payload,$doctor,$ok,$ms){
+    $day=(Get-Date).ToString('yyyy-MM-dd')
+    $file=Join-Path $LogDir "scans_$day.csv"
+    if(!(Test-Path $file)){ 'Timestamp,User,Machine,Payload,Doctor,Success,DurationMs' | Out-File $file -Encoding utf8 }
+    '{0},{1},{2},{3},{4},{5},{6}' -f (Get-Date).ToString('s'),$env:USERNAME,$env:COMPUTERNAME,
+        ($payload -replace ',',' '),$doctor,$ok,$ms | Add-Content $file
+}
+
+function Is-Dupe($payload){
+    $now=Get-Date; $k="$env:USERNAME|$payload"
+    if($global:ScanCache[$k] -and ($now-$global:ScanCache[$k]).TotalMilliseconds -lt $DedupeWindowMs){return $true}
+    $global:ScanCache[$k]=$now; return $false
+}
+
+# ---------- Hotkey ----------
+Add-Type @"
+using System; using System.Windows.Forms; using System.Runtime.InteropServices;
+public class HotKey : NativeWindow, IDisposable {
+  [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr hWnd,int id,uint mod,Keys vk);
+  [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr hWnd,int id);
+  const int WM_HOTKEY=0x0312; int _id;
+  public event EventHandler Pressed;
+  public HotKey(Keys k){CreateHandle(new CreateParams()); _id=GetHashCode(); RegisterHotKey(Handle,_id,0,k);}
+  protected override void WndProc(ref Message m){ if(m.Msg==WM_HOTKEY){Pressed?.Invoke(this,EventArgs.Empty);} base.WndProc(ref m);}
+  public void Dispose(){UnregisterHotKey(Handle,_id); DestroyHandle();}
+}
+"@
+$hk=[HotKey]::new([System.Windows.Forms.Keys]::F9)
+Register-ObjectEvent $hk Pressed -Action {
+    $code=Show-ScanPrompt; if(!$code -or (Is-Dupe $code)){return}
+    $sw=[Diagnostics.Stopwatch]::StartNew(); $ok=$false; $doc=''
+    try{
+        if($code -notmatch '^PA:(?<key>[A-Z0-9_]+)$'){ throw 'Malformed QR' }
+        $doc=$Matches.key
+        Assign-Pathologist $doc
+        $ok=$true
+    }catch{ [System.Windows.Forms.MessageBox]::Show("Failed: $($_.Exception.Message)","Assign",0) }
+    finally{ $sw.Stop(); Log-Scan $code $doc $ok $sw.ElapsedMilliseconds }
+} | Out-Null
+
+Write-Host 'Ready. Press F9 then scan. Ctrl+C to exit.'
+while($true){Start-Sleep -Seconds 1}
