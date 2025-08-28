@@ -2,12 +2,10 @@
 param(
     [string]$OutDir = "$PWD\PathologistQRCodes",
     [string[]]$Doctors = @(
-        'SWANSON','TRAN','GARCIA','WILSON','HERNANDEZ',
-        'LEE','CLARK','DIAZ','SMITH','PATEL'
-    )
+        'Masoud Asgari (MXA)','Alfredo Asuncion (AXA)','Nasim Babaidorabad (NXB)','Sepideh Banankah (SMB)','Ricardo Bardales (RHB)','Preeti Behl (PXB)','Takinder Bisla (TSB)','Olga Bohn (OLB)','Harvey Chang (HCC)','Prakash Chaudhari (PJC)','Michael Costa (MJC)', 'Shawn Emery (SCE)','Steven Fogel (SPF)','Donovan Hare (DRH)','Nazila Hejazi (NXH)','Seyed Amin Hojat (SXH)','Yingchuan Hu (YXH)','Emad Kaabipour (EXK)','Sara Kwong (SJK)','Teresa Limjoco (TIL)','Martin Luu (LUU)','Gopal Patel (GXP)','Christy Perez-Valles (CPV)','Melissa Rodgers (MMR)','Diane Sanders (DLS)','Roya Setarehshenas (RXS)','Scott Silveira (SGS)','Phillip Starshak (PSE),'Curtis Strong (CRS)','Rana Tawil (RNT)','Miao Tan (MXT)','Linda Veneman (LXV)','Anthony Victorio (ARV)','Anthony Wheeler (AMW)')
 )
 
-# Pull QRCoder DLL once. Offline?  Copy it manually, then comment this block.
+# Pull QRCoder DLL
 if (-not (Test-Path ".\QRCoder.dll")) {
     Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/QRCoder/1.6.0" -OutFile q.tzip
     Expand-Archive q.tzip -DestinationPath .\qtmp -Force
