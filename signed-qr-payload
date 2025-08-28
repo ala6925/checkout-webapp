@@ -1,0 +1,40 @@
+# ---------- config ----------
+$xlsx      = 'C:\Cerebro\Pathologist Abbreviation.xlsx'
+$sheet     = 'Sheet1'             # change if needed
+$secretB64 = Get-Content 'C:\Cerebro\qr_secret.b64' -Raw
+$outTxt    = 'C:\Cerebro\qr_payloads.txt'
+
+# ---------- crypto helpers ----------
+Add-Type -AssemblyName System.Security
+function Get-HmacSha256Hex([string]$data,[string]$keyB64) {
+    $enc  = [Text.Encoding]::UTF8
+    $key  = [Convert]::FromBase64String($keyB64)
+    $mac  = New-Object Security.Cryptography.HMACSHA256($key)
+    ($mac.ComputeHash($enc.GetBytes($data)) | ForEach-Object { $_.ToString('x2') }) -join ''
+}
+
+# ---------- pull names from Excel ----------
+$excel = New-Object -ComObject Excel.Application
+$excel.Visible = $false
+$wb = $excel.Workbooks.Open($xlsx)
+$ws = $wb.Worksheets.Item($sheet)
+
+$rows = @()
+$row  = 2             # assume row 1 is header
+while ($ws.Cells.Item($row,1).Text -ne '') {
+    $name  = $ws.Cells.Item($row,1).Text.Trim()
+    $short = $ws.Cells.Item($row,2).Text.Trim().ToUpper() -replace '\s','_'
+    if ($short) { $rows += [pscustomobject]@{ Name=$name; Key=$short } }
+    $row++
+}
+$wb.Close($false); $excel.Quit()
+
+# ---------- build payload strings ----------
+$tokens = foreach ($r in $rows) {
+    $payload = "PA:$($r.Key)"
+    $sig     = Get-HmacSha256Hex $payload $secretB64
+    "$payload|HMAC=$sig"
+}
+
+$tokens | Set-Content $outTxt -Encoding ascii
+Write-Host "Wrote $($tokens.Count) payload strings to $outTxt"
