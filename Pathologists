@@ -1,0 +1,30 @@
+# Generate-QRs.ps1
+param(
+    [string]$OutDir = "$PWD\PathologistQRCodes",
+    [string[]]$Doctors = @(
+        'SWANSON','TRAN','GARCIA','WILSON','HERNANDEZ',
+        'LEE','CLARK','DIAZ','SMITH','PATEL'
+    )
+)
+
+# Pull QRCoder DLL once. Offline?  Copy it manually, then comment this block.
+if (-not (Test-Path ".\QRCoder.dll")) {
+    Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/QRCoder/1.6.0" -OutFile q.tzip
+    Expand-Archive q.tzip -DestinationPath .\qtmp -Force
+    Copy-Item .\qtmp\**\QRCoder.dll -Destination .\QRCoder.dll
+    Remove-Item q.tzip, qtmp -Recurse
+}
+
+Add-Type -Path ".\QRCoder.dll"
+
+[System.IO.Directory]::CreateDirectory($OutDir) | Out-Null
+$gen  = [QRCoder.QRCodeGenerator]::new()
+foreach ($d in $Doctors) {
+    $payload = "PA:$d"
+    $data = $gen.CreateQrCode($payload, [QRCoder.QRCodeGenerator+ECCLevel]::Q)
+    $qr = [QRCoder.QRCode]::new($data)
+    $bmp = $qr.GetGraphic(20)  # 20 = pixels per module
+    $file = Join-Path $OutDir "$d.png"
+    $bmp.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
+    Write-Host "Wrote $file"
+}
